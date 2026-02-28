@@ -1,0 +1,18 @@
+# Claude Code internal state
+.claude/
+
+# Virtual environment
+.venv/
+
+# Generated output directories
+ep_api_test_output/
+ep_api_test_v2_output/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
