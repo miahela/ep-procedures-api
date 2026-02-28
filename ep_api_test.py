@@ -1,11 +1,9 @@
 """
-EP API Test Script v2
-=====================
-Builds on v1 (your working version) and adds:
-  - Wider timeframe feed (configurable months back, same procedure cap)
-  - Layer 2: MEP name resolution with local cache
-  - Layer 3: Meetings + foreseen activities per committee, cross-referenced to procedures
-  - Structured test/check report at the end
+EP API Explorer
+===============
+Fetches European Parliament legislative procedures, MEP details, and committee
+meetings from the EP Open Data API (v2), then saves structured CSV/JSON output
+and prints a pass/fail check report.
 
 Rate limit: 500 req / 5 min → throttle to ~2 req/s (REQ_DELAY=0.5s)
 """
@@ -13,7 +11,6 @@ Rate limit: 500 req / 5 min → throttle to ~2 req/s (REQ_DELAY=0.5s)
 import json
 import time
 import csv
-import os
 import sys
 import subprocess
 import xml.etree.ElementTree as ET
@@ -37,7 +34,7 @@ TIMEOUT     = 30
 REQ_DELAY   = 0.5
 
 # Test scope
-MAX_PROCEDURES   = 50        # keep same cap — just go further back in time
+MAX_PROCEDURES   = 50
 LOOKBACK_MONTHS  = 3         # how far back the feed goes if today is empty
 MEETINGS_HORIZON = 50        # days ahead to look for scheduled meetings
 
@@ -86,7 +83,6 @@ def get_xml(url, params=None):
         r = requests.get(url, headers=HEADERS_XML, params=params, timeout=TIMEOUT)
         request_count += 1
         r.raise_for_status()
-        print(f"  [FEED] HTTP {r.status_code}, size: {len(r.content)} bytes")
         return ET.fromstring(r.content)
     except requests.exceptions.Timeout:
         print(f"  [TIMEOUT] {url}")
@@ -278,8 +274,6 @@ def extract_foreseen_proc_refs(activity: dict) -> list[str]:
 
 def extract_participations(proc):
     rows = []
-    VALID_ID_PREFIXES = ("eli/", "2", "1")  # real IDs start with these
-
     for p in proc.get("had_participation", []):
         if not isinstance(p, dict):
             continue
