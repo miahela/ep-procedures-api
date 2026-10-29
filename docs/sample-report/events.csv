@@ -1,0 +1,4 @@
+source,event_id,type,activity_type,activity_date,stage,based_on_docs,recorded_in_docs,decided_on_docs,proc_id
+procedure_object,2026-0210-ANPRO-2026-09-17,Activity,REFERRAL,2026-09-17,RDG1,,,,2026-0210
+procedure_object,ENVI-AM-796426-DEPOT-2026-10-15,Activity,COMMITTEE_TABLING_AMENDMENT,2026-10-15,RDG1,eli/dl/doc/ENVI-AM-796426,,,2026-0210
+procedure_object,ENVI-PR-791997-DEPOT-2026-09-15,Activity,COMMITTEE_TABLING_REPORT,2026-09-15,RDG1,eli/dl/doc/ENVI-PR-791997,,,2026-0210

@@ -1,0 +1,30 @@
+{
+  "started_utc": "2026-10-29T12:23:53.281581+00:00",
+  "source": "User-run command and saved exports from the successful live run",
+  "api_base_url": "https://data.europarl.europa.eu/api/v2",
+  "scope": {
+    "max_procedures": 1,
+    "lookback_months": 1,
+    "meetings_horizon": 1,
+    "max_meetings": 3,
+    "request_delay_seconds": 1,
+    "timeout_seconds": 20
+  },
+  "exit_code": 0,
+  "checks_passed": 11,
+  "checks_failed": 0,
+  "requests_made": 21,
+  "procedures_processed": 1,
+  "participations": 19,
+  "events": 3,
+  "meps_resolved": 15,
+  "committees": [
+    "BUDG",
+    "ENVI",
+    "ITRE",
+    "TRAN"
+  ],
+  "matching_meetings": 0,
+  "foreseen_activities": 0,
+  "note": "Zero committee matches is not proof of no committee meetings. The documented endpoint covers plenary meetings; no live agenda-detail request was made."
+}

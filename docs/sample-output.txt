@@ -1,0 +1,31 @@
+> .\.venv\Scripts\python.exe .\ep_api_test.py
+============================================================
+EP API Test Script v2
+Started: 2026-10-29T12:23:53.281581+00:00
+============================================================
+
+    -> Processing 1 (cap=1)
+  [1/1] 2026-0210
+    [PASS] 2026-0210: procedure fetchable
+    [PASS] 2026-0210: has events  ->  3 events
+    [PASS] 2026-0210: has participations  ->  19 rows
+    [PASS] 2026-0210: MEP names resolved  ->  15/15 resolved
+
+    Global meeting/agenda cap: 3
+    EP v2 documents plenary meetings; no committee-calendar endpoint is advertised.
+    Strict local committee/date filters may therefore return zero meetings.
+
+============================================================
+TEST / CHECK REPORT
+============================================================
+  PASS: 11  |  FAIL: 0  |  TOTAL: 11
+
+  FINDINGS SUMMARY:
+    Procedures processed     : 1
+    API requests made        : 21
+    Unique MEPs cached       : 15
+    Committees swept         : ['BUDG', 'ENVI', 'ITRE', 'TRAN']
+    Meetings found           : 0
+    Foreseen activities      : 0
+
+Exit code: 0

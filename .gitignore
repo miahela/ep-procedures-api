@@ -3,6 +3,7 @@
 
 # Virtual environment
 .venv/
+.env
 
 # Generated output directories
 ep_api_test_output/

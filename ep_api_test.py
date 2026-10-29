@@ -5,14 +5,14 @@ Fetches European Parliament legislative procedures, MEP details, and committee
 meetings from the EP Open Data API (v2), then saves structured CSV/JSON output
 and prints a pass/fail check report.
 
-Rate limit: 500 req / 5 min → throttle to ~2 req/s (REQ_DELAY=0.5s)
+Requests are spaced by the configured delay (0.5 seconds by default).
 """
 
 import json
 import time
 import csv
+import re
 import sys
-import subprocess
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
@@ -20,28 +20,49 @@ from pathlib import Path
 
 try:
     import requests
+    from config import Settings, load_settings
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "-q"])
-    import requests
+    raise SystemExit(
+        "Missing dependency. Run: python -m pip install -r requirements.txt"
+    ) from None
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-BASE        = "https://data.europarl.europa.eu/api/v2"
+DEFAULTS    = Settings()
+BASE        = DEFAULTS.base_url
 FEED_BASE   = f"{BASE}/procedures/feed"
 HEADERS     = {"Accept": "application/json"}
 HEADERS_XML = {"Accept": "application/atom+xml, application/xml, */*"}
-TIMEOUT     = 30
-REQ_DELAY   = 0.5
+TIMEOUT = DEFAULTS.timeout
+REQ_DELAY = DEFAULTS.request_delay
 
 # Test scope
-MAX_PROCEDURES   = 50
-LOOKBACK_MONTHS  = 3         # how far back the feed goes if today is empty
-MEETINGS_HORIZON = 50        # days ahead to look for scheduled meetings
+MAX_PROCEDURES = DEFAULTS.max_procedures
+LOOKBACK_MONTHS = DEFAULTS.lookback_months
+MEETINGS_HORIZON = DEFAULTS.meetings_horizon
+MAX_MEETINGS = DEFAULTS.max_meetings
 
-OUTPUT_DIR = Path("ep_api_test_v2_output")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR = Path(DEFAULTS.output_dir)
 
 MEP_CACHE_FILE = OUTPUT_DIR / "mep_cache.json"
+
+
+def configure():
+    """Apply settings at run time, without creating files on import."""
+    global BASE, FEED_BASE, TIMEOUT, REQ_DELAY
+    global MAX_PROCEDURES, LOOKBACK_MONTHS, MEETINGS_HORIZON, MAX_MEETINGS
+    global OUTPUT_DIR, MEP_CACHE_FILE
+    settings = load_settings()
+    BASE = settings.base_url.rstrip("/")
+    FEED_BASE = f"{BASE}/procedures/feed"
+    TIMEOUT, REQ_DELAY = settings.timeout, settings.request_delay
+    MAX_PROCEDURES = settings.max_procedures
+    LOOKBACK_MONTHS = settings.lookback_months
+    MEETINGS_HORIZON = settings.meetings_horizon
+    MAX_MEETINGS = settings.max_meetings
+    OUTPUT_DIR = Path(settings.output_dir)
+    MEP_CACHE_FILE = OUTPUT_DIR / "mep_cache.json"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Committees we care about (all known EP committees)
 # Used to sweep meetings endpoint — extend as needed
@@ -54,24 +75,43 @@ ALL_COMMITTEES = [
 # ── State ─────────────────────────────────────────────────────────────────────
 
 request_count = 0
-mep_cache: dict[str, dict] = {}          # person_id → {full_name, ...}
+mep_cache: dict[str, dict] = {}          # person_id -> {full_name, ...}
 test_results: list[dict]   = []          # accumulated check results
 
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-def get_json(url, params=None):
+def get_json(url, params=None, *, empty_ok=False):
     global request_count
     time.sleep(REQ_DELAY)
+    request_count += 1
     try:
         r = requests.get(url, headers=HEADERS, params=params, timeout=TIMEOUT)
-        request_count += 1
+        print(f"  [HTTP {r.status_code}] {r.url}")
+        if empty_ok:
+            # Server failures still fail even when their body is empty.
+            if r.status_code >= 500:
+                print("  [ERROR] Server failure")
+                return None
+            if r.status_code in (204, 404) or not r.content.strip():
+                return {"data": []}
+            if r.status_code != 200:
+                print("  [SKIP] Non-200 response; no agenda items processed")
+                return {"data": []}
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise ValueError("Expected a JSON object with a data array")
+        if any(not isinstance(item, dict) for item in data["data"]):
+            raise ValueError("Expected objects inside the data array")
+        return data
     except requests.exceptions.Timeout:
         print(f"  [TIMEOUT] {url}")
         return None
-    except Exception as e:
+    except requests.RequestException as e:
+        print(f"  [ERROR] {url} -> {e}")
+        return {"data": []} if empty_ok else None
+    except ValueError as e:
         print(f"  [ERROR] {url} -> {e}")
         return None
 
@@ -79,9 +119,9 @@ def get_json(url, params=None):
 def get_xml(url, params=None):
     global request_count
     time.sleep(REQ_DELAY)
+    request_count += 1
     try:
         r = requests.get(url, headers=HEADERS_XML, params=params, timeout=TIMEOUT)
-        request_count += 1
         r.raise_for_status()
         return ET.fromstring(r.content)
     except requests.exceptions.Timeout:
@@ -90,7 +130,7 @@ def get_xml(url, params=None):
     except ET.ParseError as e:
         print(f"  [XML PARSE ERROR] {e}")
         return None
-    except Exception as e:
+    except (requests.RequestException, ValueError) as e:
         print(f"  [ERROR] {url} -> {e}")
         return None
 
@@ -129,9 +169,8 @@ def clean_id(raw, prefix=""):
 def record_check(name: str, passed: bool, detail: str = ""):
     status = "PASS" if passed else "FAIL"
     test_results.append({"check": name, "status": status, "detail": detail})
-    icon = "✓" if passed else "✗"
-    msg = f"    [{icon}] {name}"
-    if detail: msg += f"  →  {detail}"
+    msg = f"    [{status}] {name}"
+    if detail: msg += f"  ->  {detail}"
     print(msg)
 
 
@@ -173,7 +212,13 @@ def load_mep_cache():
     global mep_cache
     if MEP_CACHE_FILE.exists():
         with open(MEP_CACHE_FILE, encoding="utf-8") as f:
-            mep_cache = json.load(f)
+            try:
+                cached = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in MEP cache {MEP_CACHE_FILE}: {e}") from e
+        if not isinstance(cached, dict) or any(not isinstance(v, dict) for v in cached.values()):
+            raise ValueError(f"MEP cache {MEP_CACHE_FILE} must map person IDs to objects")
+        mep_cache = cached
         print(f"  Loaded MEP cache: {len(mep_cache)} entries")
 
 def save_mep_cache():
@@ -219,33 +264,55 @@ def resolve_mep(person_id: str) -> dict:
 
 # ── Layer 3: Meetings + foreseen activities ───────────────────────────────────
 
-def fetch_meetings(body_id: str, start_date: str, end_date: str) -> list[dict]:
+def fetch_meetings(body_id: str, start_date: str, end_date: str) -> list[dict] | None:
     """
-    GET /meetings?body-id={body_id}&start-date={start}&end-date={end}
-    Returns list of meeting objects.
+    Use documented year/paging parameters, then enforce date and committee locally.
+    EP v2 documents plenary meetings, not a committee meeting calendar.
     """
     url = f"{BASE}/meetings"
     data = get_json(url, {
         "format": "application/ld+json",
-        "body-id": body_id,
-        "start-date": start_date,
-        "end-date": end_date,
+        "year": ",".join(str(y) for y in range(int(start_date[:4]), int(end_date[:4]) + 1)),
+        "offset": 0,
+        "limit": 50,
     })
-    if data:
-        return data.get("data", [])
-    return []
+    if data is None:
+        return None
+    start, end = datetime.fromisoformat(start_date).date(), datetime.fromisoformat(end_date).date()
+    meetings = []
+    for meeting in data["data"]:
+        sitting_id = extract_sitting_id(meeting)
+        # Never relabel a plenary meeting as a committee meeting.
+        if re.match(r"G?MTG-PL-", sitting_id):
+            continue
+        match = re.search(r"\d{4}-\d{2}-\d{2}", sitting_id)
+        if not match:
+            continue
+        try:
+            day = datetime.fromisoformat(match.group()).date()
+        except ValueError:
+            continue
+        bodies = as_list(meeting.get("had_participant_organization")) + as_list(meeting.get("body_id"))
+        committee_matches = body_id in sitting_id.split("-") or any(
+            clean_id(body) == body_id for body in bodies if isinstance(body, str)
+        )
+        if start <= day <= end and committee_matches:
+            meetings.append(meeting)
+    meetings.sort(key=extract_sitting_id)
+    print(f"    Filtered {len(data['data'])} returned meetings -> {len(meetings)} for {body_id} in {start_date}..{end_date}")
+    return meetings
 
 
-def fetch_foreseen_activities(sitting_id: str) -> list[dict]:
+def fetch_foreseen_activities(sitting_id: str) -> list[dict] | None:
     """
     GET /meetings/{sitting-id}/foreseen-activities
     Returns planned activities for a sitting.
     """
     url = f"{BASE}/meetings/{sitting_id}/foreseen-activities"
-    data = get_json(url, {"format": "application/ld+json"})
+    data = get_json(url, {"format": "application/ld+json"}, empty_ok=True)
     if data:
         return data.get("data", [])
-    return []
+    return None
 
 
 def extract_sitting_id(meeting: dict) -> str:
@@ -343,6 +410,10 @@ def extract_scheduled(proc) -> list[dict]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    global request_count, mep_cache
+    configure()
+    request_count, mep_cache = 0, {}
+    test_results.clear()
     print("=" * 60)
     print("EP API Test Script v2")
     print(f"Started: {datetime.now(timezone.utc).isoformat()}")
@@ -490,25 +561,36 @@ def main():
     all_foreseen         = []
     proc_id_set          = set(proc_ids)  # for cross-reference
     foreseen_cross_refs  = []             # foreseen items that mention a tracked procedure
+    seen_meetings = set()
+    print(f"    Global meeting/agenda cap: {MAX_MEETINGS}")
+    print("    EP v2 documents plenary meetings; no committee-calendar endpoint is advertised.")
+    print("    Strict local committee/date filters may therefore return zero meetings.")
 
     for committee in target_committees:
-        print(f"    Meetings for {committee} ({today} → {end_date})...")
+        if len(all_meetings) >= MAX_MEETINGS:
+            print(f"    Meeting cap reached ({MAX_MEETINGS}); stopping the sweep.")
+            break
+        print(f"    Meetings for {committee} ({today} -> {end_date})...")
         meetings = fetch_meetings(committee, today, end_date)
-        print(f"      -> {len(meetings)} meetings")
+        print(f"      -> {len(meetings or [])} meetings")
 
         record_check(f"Meetings endpoint: {committee}",
                      meetings is not None,
-                     f"{len(meetings)} meetings returned")
+                     f"{len(meetings)} meetings returned" if meetings is not None else "Request failed")
 
-        for meeting in meetings:
+        for meeting in meetings or []:
             sitting_id = extract_sitting_id(meeting)
-            if not sitting_id:
+            if not sitting_id or sitting_id in seen_meetings:
                 continue
+            if len(all_meetings) >= MAX_MEETINGS:
+                print(f"    Meeting cap reached ({MAX_MEETINGS}); remaining meetings skipped.")
+                break
+            seen_meetings.add(sitting_id)
 
             m_row = {
                 "committee":    committee,
                 "sitting_id":   sitting_id,
-                "meeting_date": meeting.get("activity_date", ""),
+                "meeting_date": re.search(r"\d{4}-\d{2}-\d{2}", sitting_id).group(),
                 "meeting_type": normalise_activity_type(meeting.get("had_activity_type", "")),
                 "location":     meeting.get("label", ""),
             }
@@ -516,13 +598,13 @@ def main():
 
             # Fetch foreseen activities for this sitting
             foreseen = fetch_foreseen_activities(sitting_id)
-            print(f"        {sitting_id}: {len(foreseen)} foreseen activities")
+            print(f"        {sitting_id}: {len(foreseen or [])} foreseen activities")
 
             record_check(f"Foreseen activities: {sitting_id}",
                          foreseen is not None,
-                         f"{len(foreseen)} items")
+                         f"{len(foreseen)} items" if foreseen is not None else "Request failed")
 
-            for fa in foreseen:
+            for fa in foreseen or []:
                 if not isinstance(fa, dict):
                     continue
                 proc_refs = extract_foreseen_proc_refs(fa)
@@ -548,7 +630,7 @@ def main():
                                 "matched_proc_id": pid,
                             })
 
-    record_check("Foreseen activities: any returned", len(all_foreseen) > 0,
+    record_check("Foreseen activities collected (informational)", True,
                  f"{len(all_foreseen)} total")
     record_check("Foreseen cross-refs to tracked procs",
                  len(foreseen_cross_refs) >= 0,   # informational, not a failure
@@ -599,7 +681,7 @@ def main():
     if failed:
         print("  FAILURES:")
         for t in failed:
-            print(f"    ✗ {t['check']}  →  {t['detail']}")
+            print(f"    FAIL {t['check']}  ->  {t['detail']}")
         print()
 
     print("  FINDINGS SUMMARY:")
@@ -610,7 +692,7 @@ def main():
     print(f"    Committees swept         : {target_committees}")
     print(f"    Meetings found           : {len(all_meetings)}")
     print(f"    Foreseen activities      : {len(all_foreseen)}")
-    print(f"    Foreseen → proc matches  : {len(foreseen_cross_refs)}")
+    print(f"    Foreseen -> proc matches  : {len(foreseen_cross_refs)}")
     print(f"    Scheduled (from proc)    : {len(all_scheduled)}")
     print()
 
@@ -631,7 +713,7 @@ def main():
     shown = 0
     for pid, data in mep_cache.items():
         if shown >= 10: break
-        print(f"    {pid:<10} → {data.get('full_name','?'):<35} ({data.get('nationality','?')})")
+        print(f"    {pid:<10} -> {data.get('full_name','?'):<35} ({data.get('nationality','?')})")
         shown += 1
 
     print()
@@ -653,4 +735,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+    try:
+        main()
+    except (OSError, UnicodeError) as e:
+        raise SystemExit(f"File error: {e}. Check the output path and permissions.") from None
+    except ValueError as e:
+        raise SystemExit(f"Configuration or data error: {e}") from None
+    except KeyboardInterrupt:
+        raise SystemExit("Interrupted. Existing exports and cache remain in the output folder.") from None

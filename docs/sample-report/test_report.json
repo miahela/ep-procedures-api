@@ -1,0 +1,57 @@
+[
+  {
+    "check": "Feed returns procedures",
+    "status": "PASS",
+    "detail": "83 found"
+  },
+  {
+    "check": "2026-0210: procedure fetchable",
+    "status": "PASS",
+    "detail": ""
+  },
+  {
+    "check": "2026-0210: has events",
+    "status": "PASS",
+    "detail": "3 events"
+  },
+  {
+    "check": "2026-0210: has participations",
+    "status": "PASS",
+    "detail": "19 rows"
+  },
+  {
+    "check": "2026-0210: MEP names resolved",
+    "status": "PASS",
+    "detail": "15/15 resolved"
+  },
+  {
+    "check": "Meetings endpoint: BUDG",
+    "status": "PASS",
+    "detail": "0 meetings returned"
+  },
+  {
+    "check": "Meetings endpoint: ENVI",
+    "status": "PASS",
+    "detail": "0 meetings returned"
+  },
+  {
+    "check": "Meetings endpoint: ITRE",
+    "status": "PASS",
+    "detail": "0 meetings returned"
+  },
+  {
+    "check": "Meetings endpoint: TRAN",
+    "status": "PASS",
+    "detail": "0 meetings returned"
+  },
+  {
+    "check": "Foreseen activities collected (informational)",
+    "status": "PASS",
+    "detail": "0 total"
+  },
+  {
+    "check": "Foreseen cross-refs to tracked procs",
+    "status": "PASS",
+    "detail": "0 matches"
+  }
+]

@@ -1,0 +1,12 @@
+check,status,detail
+Feed returns procedures,PASS,83 found
+2026-0210: procedure fetchable,PASS,
+2026-0210: has events,PASS,3 events
+2026-0210: has participations,PASS,19 rows
+2026-0210: MEP names resolved,PASS,15/15 resolved
+Meetings endpoint: BUDG,PASS,0 meetings returned
+Meetings endpoint: ENVI,PASS,0 meetings returned
+Meetings endpoint: ITRE,PASS,0 meetings returned
+Meetings endpoint: TRAN,PASS,0 meetings returned
+Foreseen activities collected (informational),PASS,0 total
+Foreseen cross-refs to tracked procs,PASS,0 matches
